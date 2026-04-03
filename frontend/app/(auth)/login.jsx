@@ -17,6 +17,10 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as WebBrowser from "expo-web-browser";
 import * as Google from "expo-auth-session/providers/google";
+import {
+  GoogleSignin,
+  statusCodes,
+} from "@react-native-google-signin/google-signin";
 import { Logo } from "@components/Logo";
 import { authAPI } from "@api/auth";
 import { APP_ROUTES, AUTH_ROUTES } from "@constants/routes";
@@ -28,16 +32,20 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const AUTH_ROUTE = APP_ROUTES.home;
 const ADMIN_ROUTE = APP_ROUTES.adminDashboard;
 
-// ✅ Tes deux Client IDs Google
 const GOOGLE_WEB_CLIENT_ID =
   "861346189775-dcblovh2u607hduecqvi2tj0p3sv4c2i.apps.googleusercontent.com";
 const GOOGLE_ANDROID_CLIENT_ID =
   "861346189775-c9qano8fpg5lqjhlc9ebiil4ub7lpbmo.apps.googleusercontent.com";
 
+// Configure GoogleSignin une seule fois au démarrage du module
+GoogleSignin.configure({
+  webClientId: GOOGLE_WEB_CLIENT_ID,
+  androidClientId: GOOGLE_ANDROID_CLIENT_ID,
+  offlineAccess: false,
+});
+
 function normalizeEmail(v) {
-  return String(v || "")
-    .trim()
-    .toLowerCase();
+  return String(v || "").trim().toLowerCase();
 }
 function sanitizeText(v) {
   return String(v || "").trim();
@@ -56,12 +64,10 @@ async function saveLog(action, details) {
     });
     await AsyncStorage.setItem(
       "smartirrig_user_logs",
-      JSON.stringify(logs.slice(0, 200)),
+      JSON.stringify(logs.slice(0, 200))
     );
   } catch {}
 }
-
-// ✅ CORRIGÉ : envoie idToken (mobile Android) ou accessToken (web)
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function LoginScreen() {
@@ -107,7 +113,9 @@ export default function LoginScreen() {
                 onPress={() => setActiveTab(tab)}
                 activeOpacity={0.7}
               >
-                <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>
+                <Text
+                  style={[s.tabText, activeTab === tab && s.tabTextActive]}
+                >
                   {tab === "login" ? t("tabs.login") : t("tabs.signup")}
                 </Text>
                 {activeTab === tab && <View style={s.tabUnderline} />}
@@ -130,6 +138,21 @@ export default function LoginScreen() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GOOGLE SIGN-IN HELPER — platform-aware
+// ─────────────────────────────────────────────────────────────────────────────
+async function googleSignInNative() {
+  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+  const userInfo = await GoogleSignin.signIn();
+  // Support both old and new @react-native-google-signin response shapes
+  const idToken =
+    userInfo?.data?.idToken ||
+    userInfo?.idToken ||
+    userInfo?.data?.authentication?.idToken;
+  if (!idToken) throw new Error("Token Google introuvable");
+  return { idToken };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // LOGIN FORM
 // ─────────────────────────────────────────────────────────────────────────────
 function LoginForm({ t, isRTL, onOpenSignup }) {
@@ -140,19 +163,17 @@ function LoginForm({ t, isRTL, onOpenSignup }) {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [fieldError, setFieldError] = useState("");
 
-  // ✅ CORRIGÉ : ajout de androidClientId
+  // expo-auth-session → used only on Web / iOS
   const [request, response, promptAsync] = Google.useAuthRequest({
     clientId: GOOGLE_WEB_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_CLIENT_ID,
-    extraParams: {
-      prompt: "select_account",
-      access_type: "online",
-    },
+    extraParams: { prompt: "select_account", access_type: "online" },
   });
 
+  // Handle web/iOS OAuth response
   useEffect(() => {
+    if (Platform.OS === "android") return; // Android uses native flow
     if (response?.type === "success") {
-      // ✅ CORRIGÉ : récupère idToken ET accessToken
       const idToken = response.authentication?.idToken;
       const accessToken = response.authentication?.accessToken;
       handleGoogleSuccess({ idToken, accessToken });
@@ -178,6 +199,32 @@ function LoginForm({ t, isRTL, onOpenSignup }) {
     } catch (err) {
       setFieldError(err.message);
     } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGooglePress = async () => {
+    setFieldError("");
+    setGoogleLoading(true);
+    try {
+      if (Platform.OS === "android") {
+        // ✅ Native Android Google Sign-In
+        const { idToken } = await googleSignInNative();
+        await handleGoogleSuccess({ idToken });
+      } else {
+        // ✅ Web / iOS — expo-auth-session
+        setGoogleLoading(false); // promptAsync manages its own loading
+        await promptAsync();
+      }
+    } catch (err) {
+      if (
+        err.code === statusCodes.SIGN_IN_CANCELLED ||
+        err.code === statusCodes.IN_PROGRESS
+      ) {
+        // User cancelled or already in progress — silent
+      } else {
+        setFieldError(err.message || t("login.invalidCredentials"));
+      }
       setGoogleLoading(false);
     }
   };
@@ -222,7 +269,7 @@ function LoginForm({ t, isRTL, onOpenSignup }) {
           msg.includes("wrong") ||
           msg.includes("password")
           ? t("login.invalidCredentials")
-          : error?.message || t("login.invalidCredentials"),
+          : error?.message || t("login.invalidCredentials")
       );
     } finally {
       setLoading(false);
@@ -281,9 +328,8 @@ function LoginForm({ t, isRTL, onOpenSignup }) {
       />
       <Separator />
       <GoogleButton
-        request={request}
         loading={googleLoading}
-        onPress={() => promptAsync()}
+        onPress={handleGooglePress}
         label={t("common.googleLogin")}
       />
       <View
@@ -336,17 +382,15 @@ function SignupForm({ t, isRTL }) {
     setFieldError("");
   };
 
-  // ✅ CORRIGÉ : ajout de androidClientId
+  // expo-auth-session → Web / iOS only
   const [request, response, promptAsync] = Google.useAuthRequest({
     clientId: GOOGLE_WEB_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_CLIENT_ID,
-    extraParams: {
-      prompt: "select_account",
-      access_type: "online",
-    },
+    extraParams: { prompt: "select_account", access_type: "online" },
   });
 
   useEffect(() => {
+    if (Platform.OS === "android") return;
     if (response?.type === "success") {
       const idToken = response.authentication?.idToken;
       const accessToken = response.authentication?.accessToken;
@@ -373,6 +417,30 @@ function SignupForm({ t, isRTL }) {
     } catch (err) {
       setFieldError(err.message);
     } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGooglePress = async () => {
+    setFieldError("");
+    setGoogleLoading(true);
+    try {
+      if (Platform.OS === "android") {
+        const { idToken } = await googleSignInNative();
+        await handleGoogleSuccess({ idToken });
+      } else {
+        setGoogleLoading(false);
+        await promptAsync();
+      }
+    } catch (err) {
+      if (
+        err.code === statusCodes.SIGN_IN_CANCELLED ||
+        err.code === statusCodes.IN_PROGRESS
+      ) {
+        // Silent
+      } else {
+        setFieldError(err.message || t("login.invalidCredentials"));
+      }
       setGoogleLoading(false);
     }
   };
@@ -490,9 +558,8 @@ function SignupForm({ t, isRTL }) {
       />
       <Separator />
       <GoogleButton
-        request={request}
         loading={googleLoading}
-        onPress={() => promptAsync()}
+        onPress={handleGooglePress}
         label={t("common.googleLogin")}
       />
     </View>
@@ -522,13 +589,14 @@ function Separator() {
   );
 }
 
-function GoogleButton({ request, loading, onPress, label }) {
+// ✅ GoogleButton — request prop supprimé (plus nécessaire)
+function GoogleButton({ loading, onPress, label }) {
   const [imgErr, setImgErr] = useState(false);
   return (
     <TouchableOpacity
-      style={[s.googleBtn, (!request || loading) && { opacity: 0.55 }]}
+      style={[s.googleBtn, loading && { opacity: 0.55 }]}
       onPress={onPress}
-      disabled={!request || loading}
+      disabled={loading}
       activeOpacity={0.75}
     >
       {loading ? (

@@ -22,6 +22,8 @@ import {
 import { BrandHeader } from "@components/BrandHeader";
 import { useLanguage } from "@context/LanguageContext";
 
+
+
 function getDayOfYear(date) {
   const start = new Date(date.getFullYear(), 0, 0);
   return Math.floor((date - start) / 86400000);

@@ -22,7 +22,8 @@
     },
     "android": {
       "package": "com.smartirrig.app",
-      "versionCode": 1,
+      "versionCode": 3,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#22c55e"
@@ -30,29 +31,13 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE"
-      ],
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "data": [
-            {
-              "scheme": "com.smartirrig.app",
-              "host": "oauth2redirect"
-            }
-          ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
-        }
       ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
-    "scheme": "com.smartirrig.app",
+    "scheme": "smartirrig",
     "extra": {
       "eas": {
         "projectId": "1cab0d89-5c04-4ef6-b035-d02b99f7bb85"
@@ -60,7 +45,13 @@
     },
     "owner": "mohamed9543",
     "plugins": [
-      "expo-web-browser"
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "googleServicesFile": "./google-services.json",
+          "iosUrlScheme": "com.googleusercontent.apps.861346189775-dcblovh2u607hduecqvi2tj0p3sv4c2i"
+        }
+      ]
     ]
   }
 }
