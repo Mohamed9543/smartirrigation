@@ -1,14 +1,15 @@
-// C:\Users\HAMA\OneDrive\Desktop\SmartIrrig2\backend\src\controllers\irrigationController.js
+// controllers/irrigationController.js — Version complète avec RFU + Type de sol
 const Irrigation = require('../models/Irrigation');
 const Culture = require('../models/Culture');
 const Weather = require('../models/Weather');
 const { getKcForCultureAndMonth } = require('./kcController');
+const { SOIL_TYPES, calculerRFU } = require('../data/soilData');
 
 // ─── GET toutes les irrigations ───────────────────────────────────────────────
 exports.getAllIrrigations = async (req, res) => {
   try {
     const irrigations = await Irrigation.find()
-      .populate('cultureId', 'nom variete parcelle surface nombreArbres') // ✅ nombreArbres inclus
+      .populate('cultureId', 'nom variete parcelle surface nombreArbres typeSol')
       .sort({ date: -1 });
 
     const transformedData = irrigations.map((irr) => ({
@@ -21,6 +22,14 @@ exports.getAllIrrigations = async (req, res) => {
       et0: irr.et0,
       etc: irr.etc,
       kc: irr.kc,
+      eauMm: irr.eauMm,
+      debitMmh: irr.debitMmh,
+      // ✅ Champs RFU
+      typeSol: irr.typeSol,
+      rfu: irr.rfu,
+      ru: irr.ru,
+      frequenceJours: irr.frequenceJours,
+      prochaineDate: irr.prochaineDate,
       cultureId: irr.cultureId,
     }));
 
@@ -50,6 +59,13 @@ exports.getIrrigationsByCulture = async (req, res) => {
       et0: irr.et0,
       etc: irr.etc,
       kc: irr.kc,
+      eauMm: irr.eauMm,
+      debitMmh: irr.debitMmh,
+      typeSol: irr.typeSol,
+      rfu: irr.rfu,
+      ru: irr.ru,
+      frequenceJours: irr.frequenceJours,
+      prochaineDate: irr.prochaineDate,
     }));
 
     res.json({ success: true, data: transformedData, count: transformedData.length });
@@ -63,32 +79,41 @@ exports.getIrrigationsByCulture = async (req, res) => {
 exports.getIrrigationById = async (req, res) => {
   try {
     const irrigation = await Irrigation.findById(req.params.id)
-      .populate('cultureId', 'nom variete parcelle surface irrigation nombreArbres'); // ✅ nombreArbres inclus
+      .populate('cultureId', 'nom variete parcelle surface irrigation nombreArbres typeSol profondeurRacinaire');
 
     if (!irrigation) {
       return res.status(404).json({ success: false, error: 'Irrigation non trouvée' });
     }
 
-    const transformedData = {
-      _id: irrigation._id,
-      nom: irrigation.cultureId?.nom || 'Culture inconnue',
-      mode: irrigation.mode,
-      volume: irrigation.volume,
-      duree: irrigation.duree,
-      date: irrigation.date,
-      cultureId: irrigation.cultureId,
-      et0: irrigation.et0,
-      etc: irrigation.etc,
-      kc: irrigation.kc,
-      debit: irrigation.debit,
-      surface: irrigation.surface,
-      efficacite: irrigation.efficacite,
-      notes: irrigation.notes,
-      completed: irrigation.completed,
-      meteo: irrigation.meteo,
-    };
-
-    res.json({ success: true, data: transformedData });
+    res.json({
+      success: true,
+      data: {
+        _id: irrigation._id,
+        nom: irrigation.cultureId?.nom || 'Culture inconnue',
+        mode: irrigation.mode,
+        volume: irrigation.volume,
+        duree: irrigation.duree,
+        date: irrigation.date,
+        cultureId: irrigation.cultureId,
+        et0: irrigation.et0,
+        etc: irrigation.etc,
+        kc: irrigation.kc,
+        debit: irrigation.debit,
+        surface: irrigation.surface,
+        efficacite: irrigation.efficacite,
+        eauMm: irrigation.eauMm,
+        debitMmh: irrigation.debitMmh,
+        typeSol: irrigation.typeSol,
+        rfu: irrigation.rfu,
+        ru: irrigation.ru,
+        doseNetteMm: irrigation.doseNetteMm,
+        frequenceJours: irrigation.frequenceJours,
+        prochaineDate: irrigation.prochaineDate,
+        notes: irrigation.notes,
+        completed: irrigation.completed,
+        meteo: irrigation.meteo,
+      },
+    });
   } catch (error) {
     console.error('❌ Erreur GET /irrigations/:id:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -99,19 +124,9 @@ exports.getIrrigationById = async (req, res) => {
 exports.createIrrigation = async (req, res) => {
   try {
     const {
-      cultureId,
-      mode,
-      duree,
-      volume,
-      debit,
-      et0,
-      etc,
-      kc,
-      surface,
-      efficacite = 0.9,
-      notes,
-      completed = true,
-      date = new Date(),
+      cultureId, mode, duree, volume, debit,
+      et0, etc, kc, surface, efficacite = 0.9,
+      eauMm, debitMmh, notes, completed = true, date = new Date(),
     } = req.body;
 
     const culture = await Culture.findById(cultureId);
@@ -119,7 +134,20 @@ exports.createIrrigation = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Culture non trouvée' });
     }
 
-    // Données météo du jour
+    if (eauMm === undefined || eauMm === null) {
+      return res.status(400).json({ success: false, error: 'Le champ eauMm est requis' });
+    }
+    if (debitMmh === undefined || debitMmh === null) {
+      return res.status(400).json({ success: false, error: 'Le champ debitMmh est requis' });
+    }
+
+    // ✅ Calcul RFU basé sur le type de sol de la culture
+    const typeSol = culture.typeSol || 'limoneux';
+    const typeCulture = culture.type || 'legume';
+    const etcVal = parseFloat(etc) || 3.5;
+    const rfuData = calculerRFU(typeSol, typeCulture, etcVal, culture.profondeurRacinaire);
+
+    // Météo du jour
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -141,20 +169,27 @@ exports.createIrrigation = async (req, res) => {
       kc: parseFloat(kc),
       surface: parseFloat(surface),
       efficacite: parseFloat(efficacite),
+      eauMm: parseFloat(eauMm),
+      debitMmh: parseFloat(debitMmh),
+      // ✅ Champs RFU
+      typeSol,
+      ru: rfuData.ru,
+      rfu: rfuData.rfu,
+      doseNetteMm: rfuData.doseNetteMm,
+      frequenceJours: rfuData.frequenceJours,
+      prochaineDate: rfuData.prochaineDate,
       notes,
       completed,
-      meteo: weather
-        ? {
-            temperature: weather.temperature?.avg,
-            humidity: weather.humidity?.avg,
-            windSpeed: weather.wind?.speed,
-          }
-        : undefined,
+      meteo: weather ? {
+        temperature: weather.temperature?.avg,
+        humidity: weather.humidity?.avg,
+        windSpeed: weather.wind?.speed,
+      } : undefined,
     });
 
     await irrigation.save();
 
-    // Ajouter à l'historique de la culture + mettre à jour kcActuel
+    // Mise à jour historique culture
     culture.historiqueIrrigation = culture.historiqueIrrigation || [];
     culture.historiqueIrrigation.push({
       date: irrigation.date,
@@ -163,11 +198,17 @@ exports.createIrrigation = async (req, res) => {
       mode: irrigation.mode,
       et0: irrigation.et0,
       etc: irrigation.etc,
+      eauMm: irrigation.eauMm,
+      debitMmh: irrigation.debitMmh,
     });
     culture.kcActuel = parseFloat(kc);
     await culture.save();
 
-    console.log(`✅ Irrigation créée pour ${culture.nom}: ${volume}L — ETc: ${etc}mm — Kc: ${kc}`);
+    console.log(
+      `✅ Irrigation créée pour ${culture.nom}: ${volume}L — ${eauMm}mm — ` +
+      `ETc: ${etc}mm — Kc: ${kc} — Sol: ${typeSol} — RFU: ${rfuData.rfu}mm — ` +
+      `Prochaine: ${rfuData.prochaineDate.toLocaleDateString('fr-FR')}`
+    );
 
     res.status(201).json({
       success: true,
@@ -181,6 +222,13 @@ exports.createIrrigation = async (req, res) => {
         et0: irrigation.et0,
         etc: irrigation.etc,
         kc: irrigation.kc,
+        eauMm: irrigation.eauMm,
+        debitMmh: irrigation.debitMmh,
+        typeSol: irrigation.typeSol,
+        rfu: irrigation.rfu,
+        ru: irrigation.ru,
+        frequenceJours: irrigation.frequenceJours,
+        prochaineDate: irrigation.prochaineDate,
         cultureId: {
           _id: culture._id,
           nom: culture.nom,
@@ -188,6 +236,7 @@ exports.createIrrigation = async (req, res) => {
           parcelle: culture.parcelle,
         },
       },
+      rfuInfo: rfuData,
       message: 'Irrigation enregistrée avec succès',
     });
   } catch (error) {
@@ -200,9 +249,7 @@ exports.createIrrigation = async (req, res) => {
 exports.updateIrrigation = async (req, res) => {
   try {
     const irrigation = await Irrigation.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
+      req.params.id, req.body, { new: true, runValidators: true }
     ).populate('cultureId', 'nom');
 
     if (!irrigation) {
@@ -221,6 +268,13 @@ exports.updateIrrigation = async (req, res) => {
         et0: irrigation.et0,
         etc: irrigation.etc,
         kc: irrigation.kc,
+        eauMm: irrigation.eauMm,
+        debitMmh: irrigation.debitMmh,
+        typeSol: irrigation.typeSol,
+        rfu: irrigation.rfu,
+        ru: irrigation.ru,
+        frequenceJours: irrigation.frequenceJours,
+        prochaineDate: irrigation.prochaineDate,
         cultureId: irrigation.cultureId,
       },
       message: 'Irrigation mise à jour',
@@ -238,12 +292,10 @@ exports.deleteIrrigation = async (req, res) => {
     if (!irrigation) {
       return res.status(404).json({ success: false, error: 'Irrigation non trouvée' });
     }
-
     await Culture.updateOne(
       { _id: irrigation.cultureId },
       { $pull: { historiqueIrrigation: { date: irrigation.date } } }
     );
-
     res.json({ success: true, message: 'Irrigation supprimée', data: irrigation });
   } catch (error) {
     console.error('❌ Erreur DELETE /irrigations/:id:', error);
@@ -273,6 +325,12 @@ exports.getTodayIrrigations = async (req, res) => {
       et0: irr.et0,
       etc: irr.etc,
       kc: irr.kc,
+      eauMm: irr.eauMm,
+      debitMmh: irr.debitMmh,
+      typeSol: irr.typeSol,
+      rfu: irr.rfu,
+      frequenceJours: irr.frequenceJours,
+      prochaineDate: irr.prochaineDate,
       cultureId: irr.cultureId,
     }));
 
@@ -290,11 +348,10 @@ exports.getTodayIrrigations = async (req, res) => {
   }
 };
 
-// ─── GET calcul des besoins ───────────────────────────────────────────────────
+// ─── GET calcul des besoins + RFU ────────────────────────────────────────────
 /**
  * GET /api/irrigations/calculate-needs/:cultureId
- * Utilise le Kc FAO-56 réel du mois courant.
- * ✅ Calcule volumeParArbre si nombreArbres est renseigné.
+ * ✅ Calcule ETc + RFU + Fréquence optimale + Prochaine date d'irrigation
  */
 exports.calculateIrrigationNeeds = async (req, res) => {
   try {
@@ -309,23 +366,44 @@ exports.calculateIrrigationNeeds = async (req, res) => {
     const currentMonth = new Date().getMonth() + 1;
     const { kc, stade } = await getKcForCultureAndMonth(culture.nom, currentMonth);
 
-    // Dernières données météo
+    // Dernière météo
     const weather = await Weather.findOne().sort({ date: -1 });
     const et0 = weather?.et0 || 3.5;
-
     const etc = et0 * kc;
+
+    // Surface et débit
     const surface = culture.surface || 100;
-    const volumeLiters = etc * surface;
     const debit = culture.irrigation?.debit || 1000;
     const efficacite = culture.irrigation?.efficacite || 0.9;
+    const volumeLiters = etc * surface;
     const volumeReel = volumeLiters / efficacite;
     const tempsMinutes = Math.round((volumeReel / debit) * 60);
 
-    // ✅ Calcul du volume par arbre si nombreArbres est renseigné
     const nombreArbres = culture.nombreArbres || null;
     const volumeParArbre = nombreArbres && nombreArbres > 0
-      ? Math.round((volumeReel / nombreArbres) * 10) / 10  // arrondi à 0.1 L
+      ? Math.round((volumeReel / nombreArbres) * 10) / 10
       : null;
+
+    // ✅ Calcul RFU
+    const typeSol = culture.typeSol || 'limoneux';
+    const typeCulture = culture.type || 'legume';
+    const rfuData = calculerRFU(typeSol, typeCulture, etc, culture.profondeurRacinaire);
+
+    // ✅ Dernière irrigation pour calculer le cumul ETc depuis
+    const derniereIrrigation = await Irrigation.findOne({ cultureId }).sort({ date: -1 });
+    let etcCumuleDepuisIrrigation = null;
+    let joursDepuisIrrigation = null;
+    let urgenceIrrigation = false;
+    let pourcentageRFU = null;
+
+    if (derniereIrrigation) {
+      const msEcoules = Date.now() - new Date(derniereIrrigation.date).getTime();
+      joursDepuisIrrigation = Math.floor(msEcoules / (1000 * 60 * 60 * 24));
+      etcCumuleDepuisIrrigation = parseFloat((joursDepuisIrrigation * etc).toFixed(1));
+      pourcentageRFU = Math.min(100, Math.round((etcCumuleDepuisIrrigation / rfuData.rfu) * 100));
+      // Urgence si on dépasse 90% de la RFU
+      urgenceIrrigation = etcCumuleDepuisIrrigation >= rfuData.rfu * 0.9;
+    }
 
     res.json({
       success: true,
@@ -336,7 +414,9 @@ exports.calculateIrrigationNeeds = async (req, res) => {
           variete: culture.variete,
           surface,
           kc,
-          nombreArbres, // ✅ exposé dans la réponse
+          nombreArbres,
+          typeSol,
+          typeCulture,
         },
         besoins: {
           et0: et0.toFixed(2),
@@ -348,7 +428,30 @@ exports.calculateIrrigationNeeds = async (req, res) => {
           efficacite,
           debit,
           tempsMinutes,
-          volumeParArbre, // ✅ null si nombreArbres non renseigné, sinon L/arbre
+          volumeParArbre,
+        },
+        // ✅ Données RFU complètes
+        rfu: {
+          typeSol: rfuData.typeSol,
+          emoji: rfuData.emoji,
+          couleur: rfuData.couleur,
+          description: rfuData.description,
+          profondeurRacinaire: rfuData.profondeurRacinaire,
+          ru: rfuData.ru,
+          rfu: rfuData.rfu,
+          rfuTiers: rfuData.rfuTiers,
+          p: rfuData.p,
+          doseNetteMm: rfuData.doseNetteMm,
+          frequenceJours: rfuData.frequenceJours,
+          frequenceJoursArrondi: rfuData.frequenceJoursArrondi,
+          prochaineDate: rfuData.prochaineDate,
+          tauxInfiltration: rfuData.tauxInfiltration,
+          // Suivi depuis dernière irrigation
+          derniereIrrigation: derniereIrrigation?.date || null,
+          joursDepuisIrrigation,
+          etcCumuleDepuisIrrigation,
+          pourcentageRFU,
+          urgenceIrrigation,
         },
         meteo: { date: weather?.date, et0: weather?.et0 },
       },
@@ -360,10 +463,6 @@ exports.calculateIrrigationNeeds = async (req, res) => {
 };
 
 // ─── GET historique ETc ───────────────────────────────────────────────────────
-/**
- * GET /api/irrigations/etc-history/:cultureId?days=30
- * Pour chaque jour, utilise le Kc FAO-56 du mois concerné (pas une valeur fixe).
- */
 exports.getETcHistory = async (req, res) => {
   try {
     const { cultureId } = req.params;
@@ -378,14 +477,9 @@ exports.getETcHistory = async (req, res) => {
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
-    const irrigations = await Irrigation.find({
-      cultureId,
-      date: { $gte: startDate },
-    }).sort({ date: 1 });
-
+    const irrigations = await Irrigation.find({ cultureId, date: { $gte: startDate } }).sort({ date: 1 });
     const weatherData = await Weather.find({ date: { $gte: startDate } }).sort({ date: 1 });
 
-    // Maps date → données
     const weatherMap = {};
     weatherData.forEach((w) => {
       weatherMap[w.date.toISOString().split('T')[0]] = w;
@@ -396,8 +490,11 @@ exports.getETcHistory = async (req, res) => {
       irrigationMap[i.date.toISOString().split('T')[0]] = i;
     });
 
-    // Cache Kc par mois pour éviter les requêtes répétées
     const kcCache = {};
+
+    // RFU de la culture pour le graphique
+    const typeSol = culture.typeSol || 'limoneux';
+    const typeCulture = culture.type || 'legume';
 
     const history = [];
     for (let i = 0; i < parseInt(days); i++) {
@@ -410,12 +507,8 @@ exports.getETcHistory = async (req, res) => {
 
       const weather = weatherMap[dateKey];
       const irrigation = irrigationMap[dateKey];
-
-      // ET₀ réel ou valeur de repli
       const et0 = weather?.et0 || 3.5;
 
-      // Kc : si une irrigation a été enregistrée ce jour, utiliser le Kc stocké.
-      // Sinon, calculer le Kc FAO-56 du mois concerné (avec cache).
       let kc;
       if (irrigation?.kc) {
         kc = irrigation.kc;
@@ -429,6 +522,9 @@ exports.getETcHistory = async (req, res) => {
 
       const etc = irrigation?.etc != null ? irrigation.etc : parseFloat((et0 * kc).toFixed(2));
 
+      // RFU du jour (peut varier selon ETc)
+      const rfuDuJour = calculerRFU(typeSol, typeCulture, etc, culture.profondeurRacinaire);
+
       history.push({
         date,
         dateStr: dateKey,
@@ -436,17 +532,21 @@ exports.getETcHistory = async (req, res) => {
         kc: parseFloat(kc).toFixed(2),
         etc: parseFloat(etc).toFixed(2),
         volume: irrigation?.volume || 0,
+        eauMm: irrigation?.eauMm || null,
+        debitMmh: irrigation?.debitMmh || null,
         irrigated: !!irrigation,
         irrigationId: irrigation?._id,
         mode: irrigation?.mode,
         duree: irrigation?.duree || 0,
-        weather: weather
-          ? {
-              temp: weather.temperature?.avg,
-              humidity: weather.humidity?.avg,
-              wind: weather.wind?.speed,
-            }
-          : null,
+        // ✅ RFU dans l'historique
+        rfu: rfuDuJour.rfu,
+        ru: rfuDuJour.ru,
+        frequenceJours: rfuDuJour.frequenceJours,
+        weather: weather ? {
+          temp: weather.temperature?.avg,
+          humidity: weather.humidity?.avg,
+          wind: weather.wind?.speed,
+        } : null,
       });
     }
 
@@ -460,8 +560,7 @@ exports.getETcHistory = async (req, res) => {
       maxETc: Math.max(...history.map((d) => parseFloat(d.etc))).toFixed(1),
       minETc: Math.min(...history.map((d) => parseFloat(d.etc))).toFixed(1),
       avgEfficacite: (
-        (history.filter((d) => d.irrigated).length / history.length) *
-        100
+        (history.filter((d) => d.irrigated).length / history.length) * 100
       ).toFixed(0),
     };
 
@@ -475,7 +574,8 @@ exports.getETcHistory = async (req, res) => {
         parcelle: culture.parcelle,
         kcMoyen: culture.kcActuel,
         surface: culture.surface,
-        nombreArbres: culture.nombreArbres ?? null, // ✅ exposé dans la réponse
+        nombreArbres: culture.nombreArbres ?? null,
+        typeSol: culture.typeSol,
       },
       stats,
       period: `${days} jours`,

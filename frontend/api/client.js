@@ -73,24 +73,17 @@ export const API_ENDPOINTS = {
     calculateET0: `${API_BASE_URL}/weather/calculate-et0`,
     calculateETc: `${API_BASE_URL}/weather/calculate-etc`,
   },
+  // ✅ NOUVEAU — Kc saisonnier FAO-56
   kc: {
-    // GET  /api/kc         → liste toutes les cultures de la base Kc (FAO + admin)
-    search:  `${API_BASE_URL}/kc`,
-
-    // POST /api/kc         → ajouter une culture dans la base Kc (admin)
-    add:     `${API_BASE_URL}/kc`,
-
-    // DELETE /api/kc/:id   → supprimer une culture de la base Kc (admin)
-    delete:  (id) => `${API_BASE_URL}/kc/${id}`,
-
-    // GET /api/kc/:id      → détail d'une culture Kc
-    byId:    (id) => `${API_BASE_URL}/kc/${id}`,
-
-    // Anciens endpoints conservés pour compatibilité
-    mensuel: (culture) => `${API_BASE_URL}/kc/mensuel/${encodeURIComponent(culture)}`,
-    current: (culture, mois) =>
+    base:    `${API_BASE_URL}/kc`,                    // GET liste toutes les cultures Kc
+    search:  `${API_BASE_URL}/kc/search`,             // GET /api/kc/search?culture=Tomate&mois=5
+    add:     `${API_BASE_URL}/kc/add`,                // POST (admin) — ajoute une culture
+    delete:  (id) => `${API_BASE_URL}/kc/${id}`,      // DELETE (admin) — supprime une culture
+    byId:    (id) => `${API_BASE_URL}/kc/${id}`,      // GET (admin) — récupère une culture par ID
+    mensuel: (culture) => `${API_BASE_URL}/kc/mensuel/${encodeURIComponent(culture)}`, // GET mensuel/:culture
+    current: (culture, mois) =>                       // ✅ LE PLUS IMPORTANT — GET /api/kc/current
       `${API_BASE_URL}/kc/current?culture=${encodeURIComponent(culture)}${mois ? `&mois=${mois}` : ''}`,
-    init: `${API_BASE_URL}/kc/init`,
+    init:    `${API_BASE_URL}/kc/init`,               // POST (admin) — initialise données FAO-56
   },
   cultures: {
     base: `${API_BASE_URL}/cultures`,
@@ -118,6 +111,11 @@ export const API_ENDPOINTS = {
   users: {
     base: `${API_BASE_URL}/users`,
     byId: (id) => `${API_BASE_URL}/users/${id}`,
+  },
+  // ✅ AI Assistant endpoints
+  ai: {
+    chat:   `${API_BASE_URL}/ai/chat`,
+    status: `${API_BASE_URL}/ai/status`,
   },
 };
 

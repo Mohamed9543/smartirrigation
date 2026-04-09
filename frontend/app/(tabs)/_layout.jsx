@@ -4,6 +4,7 @@ import { AppDrawer } from "@components/AppDrawer";
 import { APP_ROUTES, AUTH_ROUTES } from "@constants/routes";
 import { useSession } from "@hooks/useSession";
 import { Ionicons } from "@expo/vector-icons";
+import AIChatFAB from "@components/AIChatScreen"; // ✅ NEW
 import homeIcon from "@assets/images/greenhouse.png";
 import culturesIcon from "@assets/images/agri.png";
 import calendarIcon from "@assets/images/calendar.png";
@@ -57,82 +58,88 @@ export default function TabsLayout() {
 
   return (
     <AppDrawer>
-      <Tabs
-        screenOptions={{
-          headerShown: false,
-          tabBarShowLabel: false,
-          tabBarStyle: {
-            height: 70,
-            backgroundColor: "#FFFFFF",
-            borderTopWidth: 1,
-            borderTopColor: "#E0E0E0",
-            paddingBottom: 8,
-            paddingTop: 8,
-          },
-        }}
-      >
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: "Home",
-            tabBarIcon: ({ focused }) => (
-              <TabIcon source={homeIcon} focused={focused} />
-            ),
+      {/* ✅ Wrap in View so the FAB can be positioned absolutely over everything */}
+      <View style={{ flex: 1 }}>
+        <Tabs
+          screenOptions={{
+            headerShown: false,
+            tabBarShowLabel: false,
+            tabBarStyle: {
+              height: 70,
+              backgroundColor: "#FFFFFF",
+              borderTopWidth: 1,
+              borderTopColor: "#E0E0E0",
+              paddingBottom: 8,
+              paddingTop: 8,
+            },
           }}
-        />
-        <Tabs.Screen
-          name="cultures"
-          options={{
-            title: "Cultures",
-            tabBarIcon: ({ focused }) => (
-              <TabIcon source={culturesIcon} focused={focused} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="calendar"
-          options={{
-            title: "Calendar",
-            tabBarIcon: ({ focused }) => (
-              <TabIcon source={calendarIcon} focused={focused} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="irrigation"
-          options={{
-            title: "Irrigation",
-            tabBarIcon: ({ focused }) => (
-              <TabIcon source={irrigationIcon} focused={focused} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="fertilisation"
-          options={{
-            title: "Fertilisation",
-            tabBarIcon: ({ focused }) => (
-              <TabIcon source={fertilisationIcon} focused={focused} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="contact"
-          options={{
-            title: "Contact",
-            tabBarIcon: ({ focused }) => (
-              <TabIcon iconName="mail-outline" focused={focused} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="historique"
-          options={{
-            href: null,
-            title: "Historique",
-          }}
-        />
-      </Tabs>
+        >
+          <Tabs.Screen
+            name="index"
+            options={{
+              title: "Home",
+              tabBarIcon: ({ focused }) => (
+                <TabIcon source={homeIcon} focused={focused} />
+              ),
+            }}
+          />
+          <Tabs.Screen
+            name="cultures"
+            options={{
+              title: "Cultures",
+              tabBarIcon: ({ focused }) => (
+                <TabIcon source={culturesIcon} focused={focused} />
+              ),
+            }}
+          />
+          <Tabs.Screen
+            name="calendar"
+            options={{
+              title: "Calendar",
+              tabBarIcon: ({ focused }) => (
+                <TabIcon source={calendarIcon} focused={focused} />
+              ),
+            }}
+          />
+          <Tabs.Screen
+            name="irrigation"
+            options={{
+              title: "Irrigation",
+              tabBarIcon: ({ focused }) => (
+                <TabIcon source={irrigationIcon} focused={focused} />
+              ),
+            }}
+          />
+          <Tabs.Screen
+            name="fertilisation"
+            options={{
+              title: "Fertilisation",
+              tabBarIcon: ({ focused }) => (
+                <TabIcon source={fertilisationIcon} focused={focused} />
+              ),
+            }}
+          />
+          <Tabs.Screen
+            name="contact"
+            options={{
+              title: "Contact",
+              tabBarIcon: ({ focused }) => (
+                <TabIcon iconName="mail-outline" focused={focused} />
+              ),
+            }}
+          />
+          <Tabs.Screen
+            name="historique"
+            options={{
+              href: null,
+              title: "Historique",
+            }}
+          />
+        </Tabs>
+
+        {/* ✅ AI Floating Action Button — visible on ALL tabs */}
+        <AIChatFAB />
+      </View>
     </AppDrawer>
   );
 }

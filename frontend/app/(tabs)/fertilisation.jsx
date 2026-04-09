@@ -1,7 +1,9 @@
+// app/(user)/fertilisation.jsx
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, Modal,
   FlatList, ActivityIndicator, Platform, StyleSheet,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,9 +13,10 @@ import NotificationBell from '@components/NotificationBell';
 import { useFertilisationNotifications } from '@hooks/useNotifications';
 import { API_ENDPOINTS, apiFetch } from '@api/client';
 import { useLanguage } from '@context/LanguageContext';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 // ─── Données FAO-56 ───────────────────────────────────────────────────────────
-// ✅ Fix #8: Each entry has doseParArbre (kg/arbre) AND doseParHa (kg/ha)
 const FERT = {
   Orange: [
     { jour:15, mois:1,  produit:'KNO₃',   doseParArbre:'2 kg/arbre',   doseParHa:'800 kg/ha'   },
@@ -66,22 +69,14 @@ function getFertData(nom) {
   return k ? FERT[k] : FERT._default;
 }
 
-// ✅ Fix #8: Calculate total dose for a culture based on number of trees/surface
-// app/(user)/fertilisation.jsx
-// Modification de la fonction getDoseLabel
-
-// ✅ Correction : ne pas afficher le total par surface/ha
 function getDoseLabel(ev, culture, t) {
   const nbArbres  = culture?.nombreArbres;
-  const surface   = culture?.surface; // m²
+  const surface   = culture?.surface;
   const surfaceHa = surface ? (surface / 10000) : null;
-
-  // Label traduit pour "arbres"
   const treesLabel = t ? t('cultures.details.trees') : 'arbres';
 
   let lines = [];
 
-  // Per tree - Afficher uniquement la dose par arbre
   if (ev.doseParArbre) {
     let line = ev.doseParArbre;
     if (nbArbres) {
@@ -93,7 +88,6 @@ function getDoseLabel(ev, culture, t) {
     lines.push(line);
   }
 
-  // Per ha - Afficher uniquement la dose par hectare
   if (ev.doseParHa) {
     let line = ev.doseParHa;
     if (surfaceHa) {
@@ -132,6 +126,7 @@ export default function FertilisationPage() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [activeTab,    setActiveTab]    = useState('calendar');
   const [loading,      setLoading]      = useState(true);
+  const [exporting,    setExporting]    = useState(false);
 
   const year = new Date().getFullYear();
   const moisCourts = MOIS_COURTS[lang] || MOIS_COURTS.fr;
@@ -180,49 +175,90 @@ export default function FertilisationPage() {
     .filter(ev => ev.mois === selectedMonth)
     .sort((a, b) => a.jour - b.jour);
 
-  const exportFertilisation = () => {
+  // ✅ Fonction d'exportation CSV corrigée pour mobile
+  const exportFertilisation = async () => {
     try {
-      const headers = ['Culture','Parcelle','Date','Mois','Produit','Dose/arbre','Dose/ha','Statut'];
-      const today   = new Date();
-      const tM = today.getMonth() + 1, tD = today.getDate();
+      setExporting(true);
+      
+      const headers = ['Culture', 'Parcelle', 'Date', 'Mois', 'Produit', 'Dose/arbre', 'Dose/ha', 'Statut'];
+      const today = new Date();
+      const tM = today.getMonth() + 1;
+      const tD = today.getDate();
+      const year = new Date().getFullYear();
 
       const rows = [];
       culturesToShow.forEach(c => {
         getFertData(c.nom).forEach(ev => {
-          const _doseLines = getDoseLabel(ev, c, t); // pour usage futur si besoin
-          let statut = t('fertilisation.inDays').replace('{{count}}','?');
+          let statut = t('fertilisation.inDays').replace('{{count}}', '?');
           if (ev.mois < tM || (ev.mois === tM && ev.jour <= tD)) statut = t('fertilisation.past');
           if (ev.mois === tM) statut = t('fertilisation.thisMonth');
           rows.push([
-            c.nom, c.parcelle || '—',
-            `${String(ev.jour).padStart(2,'0')}/${String(ev.mois).padStart(2,'0')}/${year}`,
+            c.nom,
+            c.parcelle || '—',
+            `${String(ev.jour).padStart(2, '0')}/${String(ev.mois).padStart(2, '0')}/${year}`,
             moisCourts[ev.mois - 1],
-            ev.produit, ev.doseParArbre || '—', ev.doseParHa || '—', statut,
+            ev.produit,
+            ev.doseParArbre || '—',
+            ev.doseParHa || '—',
+            statut,
           ]);
         });
       });
 
       const escape = v => {
         const s = String(v ?? '');
-        return s.includes(',') || s.includes('"') ? '"' + s.replace(/"/g,'""') + '"' : s;
+        return s.includes(',') || s.includes('"') ? '"' + s.replace(/"/g, '""') + '"' : s;
       };
+      
       const csv = '\uFEFF' + [
         headers.map(escape).join(','),
         ...rows.map(r => r.map(escape).join(',')),
       ].join('\r\n');
+      
       const filename = `SmartIrrig_Fertilisation_${year}.csv`;
 
       if (Platform.OS === 'web') {
-        const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement('a');
-        a.href = url; a.download = filename; a.style.display = 'none';
-        document.body.appendChild(a); a.click();
-        document.body.removeChild(a); URL.revokeObjectURL(url);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       } else {
-        alert(t('fertilisation.exporter'));
+        // ✅ Mobile: utiliser expo-file-system et expo-sharing
+        const fileUri = FileSystem.documentDirectory + filename;
+        await FileSystem.writeAsStringAsync(fileUri, csv, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        
+        // Vérifier si le partage est disponible
+        const isSharingAvailable = await Sharing.isAvailableAsync();
+        if (isSharingAvailable) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'text/csv',
+            dialogTitle: t('fertilisation.exporter') || 'Exporter la fertilisation',
+            UTI: 'public.comma-separated-values-text',
+          });
+        } else {
+          Alert.alert(
+            t('common.error') || 'Erreur',
+            t('fertilisation.sharingNotAvailable') || 'Le partage n\'est pas disponible sur cet appareil'
+          );
+        }
       }
-    } catch (e) { console.error('Export error:', e); }
+    } catch (e) {
+      console.error('Export error:', e);
+      Alert.alert(
+        t('common.error') || 'Erreur',
+        t('fertilisation.exportError') || 'Erreur lors de l\'exportation. Veuillez réessayer.'
+      );
+    } finally {
+      setExporting(false);
+    }
   };
 
   const alertTxt = ALERT_TXT[lang] || ALERT_TXT.fr;
@@ -239,9 +275,20 @@ export default function FertilisationPage() {
         title={t('fertilisation.title')}
         right={
           <View style={{ flexDirection:'row', alignItems:'center', gap:8 }}>
-            <TouchableOpacity style={s.exportBtn} onPress={exportFertilisation} activeOpacity={0.8}>
-              <Ionicons name="download-outline" size={15} color="#16a34a" />
-              <Text style={s.exportBtnText}>{t('fertilisation.exporter')}</Text>
+            <TouchableOpacity 
+              style={s.exportBtn} 
+              onPress={exportFertilisation} 
+              activeOpacity={0.8}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <ActivityIndicator size="small" color="#16a34a" />
+              ) : (
+                <>
+                  <Ionicons name="download-outline" size={15} color="#16a34a" />
+                  <Text style={s.exportBtnText}>{t('fertilisation.exporter')}</Text>
+                </>
+              )}
             </TouchableOpacity>
             <NotificationBell notifications={notifications} onMarkRead={markRead} onMarkAllRead={markAllRead} lang={lang} />
           </View>
@@ -348,7 +395,6 @@ export default function FertilisationPage() {
                         {ev.parcelle ? <Text style={s.eventParcelle}>· {ev.parcelle}</Text> : null}
                       </View>
 
-                      {/* ✅ Fix #8: Show dose per arbre AND per hectare */}
                       {doseLines.map((line, li) => (
                         <Text key={li} style={[
                           s.eventProduit,
@@ -414,7 +460,6 @@ export default function FertilisationPage() {
                     <View style={[s.listCard, isPast && { opacity:0.55 }]}>
                       <View style={{ flex:1 }}>
                         <Text style={s.listCulture}>{ev.cultureName}</Text>
-                        {/* ✅ Fix #8: show dose per ha + per arbre in list */}
                         {doseLines.map((line, li) => (
                           <Text key={li} style={[
                             s.listDose,

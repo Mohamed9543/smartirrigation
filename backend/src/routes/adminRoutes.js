@@ -2,6 +2,7 @@
 const express = require('express');
 const router  = express.Router();
 const jwt     = require('jsonwebtoken');
+const bcrypt  = require('bcryptjs');
 const Culture    = require('../models/Culture');
 const Irrigation = require('../models/Irrigation');
 const Weather    = require('../models/Weather');
@@ -149,7 +150,7 @@ router.get('/users', requireAdmin, async (req, res) => {
 });
 
 // POST /api/admin/users — créer un utilisateur
-router.post('/api/admin/users', requireAdmin, async (req, res) => {
+router.post('/users', requireAdmin, async (req, res) => {
   try {
     const mongoose = require('mongoose');
     const User = mongoose.models.User;
@@ -163,7 +164,6 @@ router.post('/api/admin/users', requireAdmin, async (req, res) => {
       return res.status(400).json({ message: "Mot de passe min 8 caractères." });
     }
     
-    const bcrypt = require('bcryptjs');
     const existing = await User.findOne({ email: email.toLowerCase().trim() });
     if (existing) {
       return res.status(409).json({ message: "Email déjà utilisé." });
@@ -198,7 +198,7 @@ router.post('/api/admin/users', requireAdmin, async (req, res) => {
 });
 
 // PUT /api/admin/users/:id — modifier un utilisateur
-router.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
+router.put('/users/:id', requireAdmin, async (req, res) => {
   try {
     const mongoose = require('mongoose');
     const User = mongoose.models.User;
@@ -214,7 +214,6 @@ router.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
     if (typeof isActive === "boolean") user.isActive = isActive;
     
     if (password) {
-      const bcrypt = require('bcryptjs');
       if (password.length < 8) {
         return res.status(400).json({ message: "Mot de passe min 8 caractères." });
       }
@@ -241,7 +240,7 @@ router.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
 });
 
 // PATCH /api/admin/users/:id/status — toggle actif/inactif
-router.patch('/api/admin/users/:id/status', requireAdmin, async (req, res) => {
+router.patch('/users/:id/status', requireAdmin, async (req, res) => {
   try {
     const mongoose = require('mongoose');
     const User = mongoose.models.User;

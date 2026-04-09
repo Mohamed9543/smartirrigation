@@ -49,9 +49,10 @@
         "@react-native-google-signin/google-signin",
         {
           "googleServicesFile": "./google-services.json",
-          "iosUrlScheme": "com.googleusercontent.apps.861346189775-dcblovh2u607hduecqvi2tj0p3sv4c2i"
+          "iosUrlScheme": "com.googleusercontent.apps.861346189775-jt0kp72jduhpgkjnnupjboosdchu11td"
         }
-      ]
+      ],
+      "expo-speech-recognition"
     ]
   }
 }

@@ -1,7 +1,6 @@
 // C:\Users\HAMA\OneDrive\Desktop\SmartIrrig2\frontend\hooks\useNotifications.js
 import { useState, useCallback, useMemo } from 'react';
 
-// IDs stables basés sur le contenu (pas un compteur global qui change à chaque render)
 const stableId = (...parts) => parts.join('|');
 
 const MOIS = {
@@ -13,9 +12,6 @@ const MOIS = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Notifications FERTILISATION
-//    - Aujourd'hui            → urgent  🔴
-//    - Dans 1–7 jours         → warning 🟡
-//    - Passé depuis 1–3 jours → info    🟢 (rappel)
 // ─────────────────────────────────────────────────────────────────────────────
 export function useFertilisationNotifications(cultures, getFertData, lang = 'fr') {
   const [readIds, setReadIds] = useState({});
@@ -26,16 +22,22 @@ export function useFertilisationNotifications(cultures, getFertData, lang = 'fr'
   }, []);
 
   const notifications = useMemo(() => {
+    // ✅ Guard : si cultures pas encore chargées
+    const safeCultures = Array.isArray(cultures) ? cultures : [];
+    if (!safeCultures.length) return [];
+
     const year = todayRef.getFullYear();
     const list = [];
 
-    cultures.forEach((culture) => {
-      const plan = getFertData(culture.nom);
+    safeCultures.forEach((culture) => {
+      if (!culture) return;
+      const plan = getFertData ? getFertData(culture.nom) : [];
+      if (!Array.isArray(plan)) return;
+
       plan.forEach((ev) => {
         const evDate = new Date(year, ev.mois - 1, ev.jour);
         const diff   = Math.round((evDate - todayRef) / 86400000);
         const dateLabel = `${ev.jour} ${months[ev.mois - 1]}`;
-        // ID stable = ne change pas d'un render à l'autre
         const id = stableId(culture._id || culture.nom, ev.mois, ev.jour, ev.produit);
 
         if (diff === 0) {
@@ -66,7 +68,6 @@ export function useFertilisationNotifications(cultures, getFertData, lang = 'fr'
 
     const ORDER = { urgent:0, warning:1, info:2, done:3 };
     list.sort((a, b) => (ORDER[a.type]||3) - (ORDER[b.type]||3));
-    // Appliquer état lu
     return list.map((n) => ({ ...n, read: !!readIds[n.id] }));
   }, [cultures, getFertData, lang, todayRef, readIds, months]);
 
@@ -77,7 +78,6 @@ export function useFertilisationNotifications(cultures, getFertData, lang = 'fr'
   const markAllRead = useCallback(() => {
     setReadIds((prev) => {
       const next = { ...prev };
-      // On lit directement depuis la closure de notifications
       notifications.forEach((n) => { next[n.id] = true; });
       return next;
     });
@@ -88,10 +88,6 @@ export function useFertilisationNotifications(cultures, getFertData, lang = 'fr'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. Notifications IRRIGATION
-//    - ETc > 5 + pas irrigué aujourd'hui → urgent  🔴
-//    - ETc > 3 + pas irrigué depuis 2j   → warning 🟡
-//    - Irrigué aujourd'hui               → done    ✅
-//    - Météo indisponible                → info    🔵
 // ─────────────────────────────────────────────────────────────────────────────
 export function useIrrigationNotifications(cultures, irrigations, weather, lang = 'fr') {
   const [readIds, setReadIds] = useState({});
@@ -103,14 +99,20 @@ export function useIrrigationNotifications(cultures, irrigations, weather, lang 
   const et0 = weather?.et0 ?? null;
 
   const notifications = useMemo(() => {
+    // ✅ Guards : données pas encore chargées → retourner liste vide
+    const safeCultures   = Array.isArray(cultures)   ? cultures   : [];
+    const safeIrrigations = Array.isArray(irrigations) ? irrigations : [];
+
+    if (!safeCultures.length) return [];
+
     const list = [];
 
-    cultures.forEach((culture) => {
+    safeCultures.forEach((culture) => {
+      if (!culture) return;
       const cid = culture._id;
 
-      // Dernière irrigation de cette culture
-      const cultIrrs = (irrigations || [])
-        .filter((i) => (i.cultureId?._id || i.cultureId) === cid)
+      const cultIrrs = safeIrrigations
+        .filter((i) => i && (i.cultureId?._id || i.cultureId) === cid)
         .sort((a, b) => new Date(b.date) - new Date(a.date));
 
       const last = cultIrrs[0];
@@ -124,11 +126,11 @@ export function useIrrigationNotifications(cultures, irrigations, weather, lang 
       const kc  = culture.kcActuel || 0.65;
       const etc = et0 != null ? parseFloat((et0 * kc).toFixed(1)) : null;
 
-      // IDs stables
-      const idDone    = stableId(cid, 'done',    todayRef.toISOString().slice(0,10));
-      const idUrgent  = stableId(cid, 'urgent',  todayRef.toISOString().slice(0,10));
-      const idWarning = stableId(cid, 'warning', todayRef.toISOString().slice(0,10));
-      const idInfo    = stableId(cid, 'info',    todayRef.toISOString().slice(0,10));
+      const dateKey   = todayRef.toISOString().slice(0, 10);
+      const idDone    = stableId(cid, 'done',    dateKey);
+      const idUrgent  = stableId(cid, 'urgent',  dateKey);
+      const idWarning = stableId(cid, 'warning', dateKey);
+      const idInfo    = stableId(cid, 'info',    dateKey);
 
       if (daysSince === 0) {
         list.push({

@@ -3,10 +3,11 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const kcController = require('../controllers/kcController');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-in-production';
 
-// Middleware optionnel — extrait userId et role
+// ─── Middleware optionnel — extrait userId et role ────────────────────────────
 function optionalAuth(req, res, next) {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -19,7 +20,7 @@ function optionalAuth(req, res, next) {
   next();
 }
 
-// Middleware admin requis
+// ─── Middleware admin requis ──────────────────────────────────────────────────
 function requireAdmin(req, res, next) {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -35,36 +36,25 @@ function requireAdmin(req, res, next) {
   }
 }
 
-// Lazy-load du modèle KCReference
-function getKCModel() {
-  const mongoose = require('mongoose');
-  if (mongoose.models.KCReference) return mongoose.models.KCReference;
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPORTANT : les routes spécifiques DOIVENT être déclarées AVANT /:id
+// sinon Express interprète "current", "search", "mensuel" comme des IDs Mongo.
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const kcSchema = new mongoose.Schema({
-    culture:   { type: String, required: true, unique: true },
-    aliases:   [String],
-    variete:   String,
-    type:      { type: String, enum: ['agrume', 'cereale', 'legume', 'fruit'], default: 'legume' },
-    stades: [{
-      nom:     String,
-      kc:      Number,
-      periode: { debut: Number, fin: Number },
-    }],
-    kcMoyen:   Number,
-    references: {
-      fao:    { type: Boolean, default: false },
-      source: String,
-      notes:  String,
-    },
-  }, { timestamps: true });
+// ─── GET /api/kc/current?culture=Orange&mois=4 ───────────────────────────────
+// ✅ Retourne le Kc saisonnier FAO-56 du mois courant pour une culture donnée
+router.get('/current', optionalAuth, kcController.getKCCurrent);
 
-  return mongoose.model('KCReference', kcSchema);
-}
+// ─── GET /api/kc/search?culture=Tomate&mois=5 ────────────────────────────────
+router.get('/search', optionalAuth, kcController.getKCByCulture);
 
-// ─── GET /api/kc — liste toutes les cultures de la base Kc ──────────────────
+// ─── GET /api/kc/mensuel/:culture ────────────────────────────────────────────
+router.get('/mensuel/:culture', optionalAuth, kcController.getKCMensuel);
+
+// ─── GET /api/kc — liste toutes les cultures de la base Kc ───────────────────
 router.get('/', optionalAuth, async (req, res) => {
   try {
-    const KCReference = getKCModel();
+    const KCReference = require('../models/KCReference');
     const cultures = await KCReference.find().sort({ culture: 1 });
     res.json({ success: true, data: cultures });
   } catch (err) {
@@ -73,21 +63,40 @@ router.get('/', optionalAuth, async (req, res) => {
   }
 });
 
-// ─── POST /api/kc — ajouter une culture à la base Kc (admin) ────────────────
+// ─── GET /api/kc/:id — détail d'une culture ──────────────────────────────────
+router.get('/:id', optionalAuth, async (req, res) => {
+  try {
+    const KCReference = require('../models/KCReference');
+    const culture = await KCReference.findById(req.params.id);
+    if (!culture) {
+      return res.status(404).json({ success: false, error: 'Culture non trouvée' });
+    }
+    res.json({ success: true, data: culture });
+  } catch (err) {
+    console.error('❌ GET /kc/:id error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── POST /api/kc/init — (re)charge toutes les données FAO-56 (admin) ─────────
+router.post('/init', requireAdmin, kcController.initializeKCData);
+
+// ─── POST /api/kc/add — ajoute une culture via kcController (admin) ───────────
+router.post('/add', requireAdmin, kcController.addKCEntry);
+
+// ─── POST /api/kc — ajoute une culture directement (admin) ───────────────────
 router.post('/', requireAdmin, async (req, res) => {
   try {
-    const KCReference = getKCModel();
+    const KCReference = require('../models/KCReference');
     const { culture, aliases, variete, type, stades, kcMoyen, references } = req.body;
 
     if (!culture || !culture.trim()) {
       return res.status(400).json({ success: false, error: 'Le nom de la culture est requis' });
     }
 
-    // Vérifier doublon
     const existing = await KCReference.findOne({
       culture: { $regex: new RegExp(`^${culture.trim()}$`, 'i') }
     });
-
     if (existing) {
       return res.status(409).json({
         success: false,
@@ -96,7 +105,6 @@ router.post('/', requireAdmin, async (req, res) => {
       });
     }
 
-    // Calculer kcMoyen si non fourni
     let computedKcMoyen = kcMoyen;
     if (!computedKcMoyen && Array.isArray(stades) && stades.length > 0) {
       computedKcMoyen = parseFloat(
@@ -122,41 +130,7 @@ router.post('/', requireAdmin, async (req, res) => {
   }
 });
 
-// ─── DELETE /api/kc/:id — supprimer une culture de la base Kc (admin) ────────
-router.delete('/:id', requireAdmin, async (req, res) => {
-  try {
-    const KCReference = getKCModel();
-
-    if (!req.params.id || req.params.id.length < 10) {
-      return res.status(400).json({ success: false, error: 'ID invalide' });
-    }
-
-    const deleted = await KCReference.findByIdAndDelete(req.params.id);
-    if (!deleted) {
-      return res.status(404).json({ success: false, error: 'Culture non trouvée dans la base Kc' });
-    }
-
-    console.log('✅ KCReference supprimée:', deleted.culture);
-    res.json({ success: true, message: `"${deleted.culture}" supprimée de la base Kc`, data: deleted });
-  } catch (err) {
-    console.error('❌ DELETE /kc/:id error:', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ─── GET /api/kc/:id — détail d'une culture ──────────────────────────────────
-router.get('/:id', optionalAuth, async (req, res) => {
-  try {
-    const KCReference = getKCModel();
-    const culture = await KCReference.findById(req.params.id);
-    if (!culture) {
-      return res.status(404).json({ success: false, error: 'Culture non trouvée' });
-    }
-    res.json({ success: true, data: culture });
-  } catch (err) {
-    console.error('❌ GET /kc/:id error:', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// ─── DELETE /api/kc/:id — supprimer une culture de la base Kc (admin) ─────────
+router.delete('/:id', requireAdmin, kcController.deleteKCEntry);
 
 module.exports = router;

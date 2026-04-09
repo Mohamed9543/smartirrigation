@@ -9,6 +9,9 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import "../global.css";
 import { LanguageProvider } from "@context/LanguageContext";
 
+// ❌ NE PAS importer AIChatFAB ici
+// ✅ Le FAB est dans app/(tabs)/_layout.jsx uniquement
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {

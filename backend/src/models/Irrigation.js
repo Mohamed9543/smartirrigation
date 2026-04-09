@@ -1,65 +1,47 @@
+// models/Irrigation.js — Version mise à jour avec champs RFU/sol
 const mongoose = require('mongoose');
 
 const irrigationSchema = new mongoose.Schema({
-  cultureId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Culture', 
-    required: true 
+  cultureId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Culture',
+    required: true
   },
-  date: { 
-    type: Date, 
-    required: true, 
-    default: Date.now 
+  date: {
+    type: Date,
+    required: true,
+    default: Date.now
   },
-  mode: { 
-    type: String, 
-    enum: ['goutte-à-goutte', 'aspersion', 'gravitaire'], 
-    required: true 
-  },
-  duree: { 
-    type: Number, 
-    required: true, 
-    min: 0 
-  }, // en minutes
-  volume: { 
-    type: Number, 
-    required: true, 
-    min: 0 
-  }, // en litres
-  debit: { 
-    type: Number, 
-    required: true 
-  }, // L/h ou m³/h selon le mode
-  et0: { 
-    type: Number, 
-    required: true 
-  }, // ET₀ du jour en mm/j
-  etc: { 
-    type: Number, 
-    required: true 
-  }, // ETc calculé en mm/j
-  kc: { 
-    type: Number, 
-    required: true 
-  }, // Coefficient cultural utilisé
-  surface: { 
-    type: Number, 
-    required: true 
-  }, // Surface irriguée en m²
-  efficacite: { 
-    type: Number, 
-    default: 0.9,
-    min: 0,
-    max: 1
-  }, // Efficacité du système
-  notes: { 
+  mode: {
     type: String,
-    maxLength: 500
+    enum: ['goutte-à-goutte', 'aspersion', 'gravitaire'],
+    required: true
   },
-  completed: { 
-    type: Boolean, 
-    default: true 
+  duree:     { type: Number, required: true, min: 0 },   // en minutes
+  volume:    { type: Number, required: true, min: 0 },   // en litres
+  debit:     { type: Number, required: true },           // L/h
+  et0:       { type: Number, required: true },           // mm/j
+  etc:       { type: Number, required: true },           // mm/j
+  kc:        { type: Number, required: true },
+  surface:   { type: Number, required: true },           // m²
+  efficacite:{ type: Number, default: 0.9, min: 0, max: 1 },
+  eauMm:     { type: Number, required: true },           // mm apportés
+  debitMmh:  { type: Number, required: true },           // mm/h
+
+  // ✅ NOUVEAUX CHAMPS RFU / Sol
+  typeSol: {
+    type: String,
+    enum: ['sableux', 'limono_sableux', 'limoneux', 'argilo_limoneux', 'argileux'],
+    default: null,
   },
+  ru: { type: Number, default: null },       // Réserve Utile calculée (mm)
+  rfu: { type: Number, default: null },      // Réserve Facilement Utilisable (mm)
+  doseNetteMm: { type: Number, default: null }, // Dose nette recommandée (mm)
+  frequenceJours: { type: Number, default: null }, // Intervalle optimal (jours)
+  prochaineDate: { type: Date, default: null },    // Date optimale prochaine irrigation
+
+  notes: { type: String, maxLength: 500 },
+  completed: { type: Boolean, default: true },
   meteo: {
     temperature: Number,
     humidity: Number,

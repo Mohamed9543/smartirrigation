@@ -1,18 +1,23 @@
-// C:\Users\HAMA\OneDrive\Desktop\SmartIrrig2\backend\src\controllers\kcController.js
+// controllers/kcController.js
 const KCReference = require('../models/KCReference');
-const KC_DATA = require('../data/kcData'); // le fichier de données FAO-56
+const KC_DATA = require('../data/kcData'); // données FAO-56
 
 // ─── Utilitaire partagé ───────────────────────────────────────────────────────
 
 /**
- * Recherche le Kc correct pour une culture donnée et un mois donné.
- * Utilisé par cultureController et irrigationController.
+ * Recherche le Kc saisonnier FAO-56 pour une culture et un mois donnés.
+ * Utilisé par kcController, irrigationController, cultureController.
+ *
+ * Ordre de recherche :
+ *  1. Correspondance exacte (insensible à la casse) sur `culture` ou `aliases`
+ *  2. Correspondance partielle sur le premier mot du nom
+ *  3. Valeur par défaut FAO : 0.65
  */
 async function getKcForCultureAndMonth(cultureName, mois) {
-  const month = mois || (new Date().getMonth() + 1);
+  const month    = mois || (new Date().getMonth() + 1);
   const nameNorm = (cultureName || '').toLowerCase().trim();
 
-  // 1. Chercher dans KCReference (recherche partielle insensible à la casse)
+  // 1. Recherche principale
   let kcRef = await KCReference.findOne({
     $or: [
       { culture: { $regex: nameNorm, $options: 'i' } },
@@ -20,7 +25,7 @@ async function getKcForCultureAndMonth(cultureName, mois) {
     ],
   });
 
-  // 2. Si non trouvé, essayer avec le premier mot du nom (ex: "Orange Navel" → "Orange")
+  // 2. Fallback sur le premier mot (ex: "Orange Navel" → "Orange")
   if (!kcRef) {
     const firstWord = nameNorm.split(' ')[0];
     if (firstWord && firstWord !== nameNorm) {
@@ -37,10 +42,11 @@ async function getKcForCultureAndMonth(cultureName, mois) {
     return { kc: 0.65, stade: 'Moyen FAO', source: 'default', found: false };
   }
 
-  // 3. Trouver le stade correspondant au mois
+  // 3. Trouver le stade correspondant au mois courant
   let stadeTrouve = null;
   for (const stade of kcRef.stades) {
     const { debut, fin } = stade.periode;
+    // Gestion de la période qui chevauche le changement d'année (ex: Dec→Fév)
     if (debut <= fin) {
       if (month >= debut && month <= fin) { stadeTrouve = stade; break; }
     } else {
@@ -48,18 +54,52 @@ async function getKcForCultureAndMonth(cultureName, mois) {
     }
   }
 
-  const kc    = stadeTrouve ? stadeTrouve.kc    : kcRef.kcMoyen;
-  const stade = stadeTrouve ? stadeTrouve.nom    : 'Moyen annuel';
+  const kc    = stadeTrouve ? stadeTrouve.kc  : kcRef.kcMoyen;
+  const stade = stadeTrouve ? stadeTrouve.nom  : 'Moyen annuel';
 
   return { kc, stade, source: kcRef.culture, found: true };
 }
 
+// Export de l'utilitaire pour les autres controllers
 module.exports.getKcForCultureAndMonth = getKcForCultureAndMonth;
 
-// ─── Initialisation ───────────────────────────────────────────────────────────
-
+// ─── GET /api/kc/current?culture=Orange&mois=4 ───────────────────────────────
 /**
- * POST /api/kc/init
+ * Retourne le Kc saisonnier FAO-56 du mois demandé (ou mois courant si absent).
+ * Utilisé par irrigation.jsx → fetchKcDynamique()
+ *
+ * Réponse :
+ *   { success: true, data: { kc, stade, source, found, mois } }
+ */
+exports.getKCCurrent = async (req, res) => {
+  try {
+    const { culture, mois } = req.query;
+
+    if (!culture) {
+      return res.status(400).json({ success: false, error: 'Paramètre culture requis' });
+    }
+
+    const month  = mois ? parseInt(mois) : new Date().getMonth() + 1;
+    const result = await getKcForCultureAndMonth(culture, month);
+
+    return res.json({
+      success: true,
+      data: {
+        kc:     result.kc,
+        stade:  result.stade,
+        source: result.source,
+        found:  result.found,
+        mois:   month,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Erreur getKCCurrent:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ─── POST /api/kc/init ────────────────────────────────────────────────────────
+/**
  * (Re)charge toutes les données FAO-56 dans la collection KCReference.
  */
 exports.initializeKCData = async (req, res) => {
@@ -77,14 +117,10 @@ exports.initializeKCData = async (req, res) => {
   }
 };
 
-// ─── Ajout d'une nouvelle entrée Kc ──────────────────────────────────────────
-
+// ─── POST /api/kc/add ─────────────────────────────────────────────────────────
 /**
- * POST /api/kc/add
- * Ajoute une nouvelle culture à la base KCReference si elle n'existe pas déjà.
+ * Ajoute une nouvelle culture à la base KCReference (si elle n'existe pas déjà).
  * Appelé automatiquement depuis addculture.jsx quand l'admin saisit une culture inconnue.
- *
- * Body: { culture, aliases, variete, type, stades, kcMoyen, references }
  */
 exports.addKCEntry = async (req, res) => {
   try {
@@ -97,7 +133,6 @@ exports.addKCEntry = async (req, res) => {
       });
     }
 
-    // Vérifier si la culture existe déjà
     const existing = await KCReference.findOne({
       $or: [
         { culture: { $regex: culture.trim(), $options: 'i' } },
@@ -114,7 +149,6 @@ exports.addKCEntry = async (req, res) => {
       });
     }
 
-    // Calculer kcMoyen si non fourni
     const computedKcMoyen = kcMoyen
       || Math.round((stades.reduce((sum, s) => sum + s.kc, 0) / stades.length) * 100) / 100;
 
@@ -127,7 +161,7 @@ exports.addKCEntry = async (req, res) => {
       kcMoyen:    computedKcMoyen,
       references: references || {
         fao: false,
-        source: 'Ajouté manuellement par l\'administrateur',
+        source: "Ajouté manuellement par l'administrateur",
         notes: '',
       },
     });
@@ -146,11 +180,7 @@ exports.addKCEntry = async (req, res) => {
   }
 };
 
-// ─── Recherche ────────────────────────────────────────────────────────────────
-
-/**
- * GET /api/kc/search?culture=Tomate&mois=5
- */
+// ─── GET /api/kc/search?culture=Tomate&mois=5 ────────────────────────────────
 exports.getKCByCulture = async (req, res) => {
   try {
     const { culture, mois } = req.query;
@@ -183,9 +213,7 @@ exports.getKCByCulture = async (req, res) => {
   }
 };
 
-/**
- * GET /api/kc/mensuel/:culture
- */
+// ─── GET /api/kc/mensuel/:culture ─────────────────────────────────────────────
 exports.getKCMensuel = async (req, res) => {
   try {
     const { culture } = req.params;
@@ -215,10 +243,10 @@ exports.getKCMensuel = async (req, res) => {
         }
       }
       kcMensuel.push({
-        mois:  moisLabels[i - 1],
+        mois:   moisLabels[i - 1],
         numero: i,
-        kc:    stadeTrouve ? stadeTrouve.kc   : kcData.kcMoyen,
-        stade: stadeTrouve ? stadeTrouve.nom   : 'Hors saison',
+        kc:     stadeTrouve ? stadeTrouve.kc  : kcData.kcMoyen,
+        stade:  stadeTrouve ? stadeTrouve.nom  : 'Hors saison',
       });
     }
 
@@ -238,11 +266,7 @@ exports.getKCMensuel = async (req, res) => {
   }
 };
 
-/**
- * DELETE /api/kc/:id
- * Supprime une culture de la base KCReference.
- * ⚠️ Ne supprime PAS les cultures utilisateurs (collection Culture) — seulement la référence Kc.
- */
+// ─── DELETE /api/kc/:id ───────────────────────────────────────────────────────
 exports.deleteKCEntry = async (req, res) => {
   try {
     const { id } = req.params;
@@ -257,23 +281,6 @@ exports.deleteKCEntry = async (req, res) => {
     res.json({ success: true, message: `"${deleted.culture}" supprimée de la base Kc` });
   } catch (error) {
     console.error('❌ Erreur deleteKCEntry:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-/**
- * GET /api/kc/current?culture=Orange&mois=3
- */
-exports.getKCCurrent = async (req, res) => {
-  try {
-    const { culture, mois } = req.query;
-    if (!culture) {
-      return res.status(400).json({ success: false, error: 'Paramètre culture requis' });
-    }
-    const month  = mois ? parseInt(mois) : new Date().getMonth() + 1;
-    const result = await getKcForCultureAndMonth(culture, month);
-    res.json({ success: true, data: { ...result, mois: month } });
-  } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };

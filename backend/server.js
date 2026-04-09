@@ -36,6 +36,8 @@ const messageRoutes    = require("./src/routes/messageRoutes");
 const Irrigation       = require("./src/models/Irrigation");
 const { connectAllMongo } = require("./config/mongodbConnections");
 
+const aiRoutes = require('./src/routes/aiRoutes');
+
 const app = express();
 app.use(helmet());
 app.use(cors({
@@ -45,7 +47,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(morgan("dev"));
-
+app.use('/api/ai', aiRoutes);
 const PORT           = Number.parseInt(process.env.PORT, 10) || 5000;
 const JWT_SECRET     = process.env.JWT_SECRET  || "default-secret-change-in-production";
 const APP_URL        = process.env.APP_URL      || "http://localhost:3000";
@@ -514,71 +516,6 @@ app.post("/api/auth/google", async (req, res) => {
   } catch (e) {
     console.error("Google auth error:", e.message);
     res.status(500).json({ message: "Erreur connexion Google." });
-  }
-});
-
-// ─── ADMIN CRUD ───────────────────────────────────────────────────────────────
-
-app.post("/api/admin/users", requireAdmin, async (req, res) => {
-  try {
-    const { firstName, lastName, address, email, password, isActive } = req.body;
-    if (!firstName || !lastName || !email || !password) return res.status(400).json({ message: "Champs requis manquants." });
-    if (password.length < 8) return res.status(400).json({ message: "Mot de passe min 8 caractères." });
-    const existing = await User.findOne({ email: normalizeEmail(email) });
-    if (existing) return res.status(409).json({ message: "Email déjà utilisé." });
-    const hashed = await bcrypt.hash(password, 12);
-    const user = await User.create({
-      firstName: firstName.trim(), lastName: lastName.trim(),
-      address: (address || "").trim() || "Non renseigné",
-      email: normalizeEmail(email), password: hashed, isActive: isActive !== false,
-    });
-    res.status(201).json({
-      success: true,
-      user: {
-        id: user._id, firstName: user.firstName, lastName: user.lastName,
-        email: user.email, address: user.address, isActive: user.isActive, createdAt: user.createdAt
-      }
-    });
-  } catch (e) {
-    res.status(500).json({ message: e.message.includes("duplicate") ? "Email déjà utilisé." : "Erreur création." });
-  }
-});
-
-app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
-  try {
-    const { firstName, lastName, address, isActive, password } = req.body;
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ message: "Utilisateur non trouvé." });
-    if (firstName) user.firstName = firstName.trim();
-    if (lastName)  user.lastName  = lastName.trim();
-    if (address)   user.address   = address.trim();
-    if (typeof isActive === "boolean") user.isActive = isActive;
-    if (password) {
-      if (password.length < 8) return res.status(400).json({ message: "Mot de passe min 8 caractères." });
-      user.password = await bcrypt.hash(password, 12);
-    }
-    await user.save();
-    res.json({
-      success: true,
-      user: {
-        id: user._id, firstName: user.firstName, lastName: user.lastName,
-        email: user.email, address: user.address, isActive: user.isActive, createdAt: user.createdAt
-      }
-    });
-  } catch (e) {
-    res.status(500).json({ message: "Erreur modification." });
-  }
-});
-
-app.patch("/api/admin/users/:id/status", requireAdmin, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ message: "Utilisateur non trouvé." });
-    user.isActive = !user.isActive;
-    await user.save();
-    res.json({ success: true, isActive: user.isActive });
-  } catch (e) {
-    res.status(500).json({ message: "Erreur toggle statut." });
   }
 });
 
