@@ -79,7 +79,7 @@ async function getLiveWeather(city = 'Tunis') {
   }
 }
 
-// ── Données FAO-56 fertilisation (même référentiel que le frontend) ────────────
+// ── Données FAO-56 fertilisation ──────────────────────────────────────────────
 const FERT_FAO = {
   Orange:    [
     { jour:15, mois:1,  produit:'KNO₃',      doseParHa:'800 kg/ha'  },
@@ -132,13 +132,11 @@ function getFAOFertData(nom) {
   return key ? FERT_FAO[key] : FERT_FAO._default;
 }
 
-// Retourne la prochaine date FAO-56 à venir (ou la plus proche passée)
 function getNextFAOFertDate(nom) {
   const events = getFAOFertData(nom);
   const now    = new Date();
   const year   = now.getFullYear();
 
-  // Construire toutes les dates pour cette année et l'an prochain
   const dates = [];
   for (const ev of events) {
     const d = new Date(year, ev.mois - 1, ev.jour);
@@ -147,13 +145,12 @@ function getNextFAOFertDate(nom) {
     dates.push({ date: dNext, produit: ev.produit, dose: ev.doseParHa });
   }
 
-  // Trier et trouver la prochaine date future
   dates.sort((a, b) => a.date - b.date);
   const future = dates.find(d => d.date >= now);
   return future || dates[dates.length - 1];
 }
 
-// ── Formater date en français lisible ─────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function formatDate(date) {
   if (!date) return null;
   return new Date(date).toLocaleDateString('fr-FR', {
@@ -161,11 +158,10 @@ function formatDate(date) {
   });
 }
 
-// ── Calcul jours restants + label ─────────────────────────────────────────────
 function joursLabel(prochaineDate) {
   if (!prochaineDate) return null;
   const diff = Math.ceil((new Date(prochaineDate) - new Date()) / (1000 * 60 * 60 * 24));
-  if (diff > 0)  return `dans ${diff} jour(s)`;
+  if (diff > 0)   return `dans ${diff} jour(s)`;
   if (diff === 0) return "aujourd'hui";
   return `en retard de ${Math.abs(diff)} jour(s)`;
 }
@@ -176,7 +172,6 @@ async function buildUserContext(userId, userCity = 'Tunis') {
     const cultures   = await Culture.find({ userId }).sort({ createdAt: -1 });
     const cultureIds = cultures.map(c => c._id);
 
-    // ── Irrigations ───────────────────────────────────────────────────────────
     const irrigations = await Irrigation.find({ cultureId: { $in: cultureIds } })
       .sort({ date: -1 })
       .limit(20)
@@ -188,7 +183,6 @@ async function buildUserContext(userId, userCity = 'Tunis') {
       if (cid && !lastIrrigByCulture[cid]) lastIrrigByCulture[cid] = irr;
     }
 
-    // ── Fertilisations ────────────────────────────────────────────────────────
     const fertilisations = await Fertilisation.find({ cultureId: { $in: cultureIds } })
       .sort({ date: -1 })
       .limit(20)
@@ -202,7 +196,6 @@ async function buildUserContext(userId, userCity = 'Tunis') {
 
     const weather = await getLiveWeather(userCity);
 
-    // ── Résumé cultures ───────────────────────────────────────────────────────
     const cropsSummary = cultures.length === 0
       ? 'Aucune culture enregistrée.'
       : cultures.map((c, i) => {
@@ -213,7 +206,6 @@ async function buildUserContext(userId, userCity = 'Tunis') {
           return `${i + 1}. ${c.nom} (${c.variete}) — ${surface} ${arbres} ${kc} ${stade}`.trim();
         }).join('\n');
 
-    // ── Historique irrigation ─────────────────────────────────────────────────
     const irrigationSummary = irrigations.length === 0
       ? 'Aucune irrigation récente.'
       : irrigations.slice(0, 5).map(irr => {
@@ -222,7 +214,6 @@ async function buildUserContext(userId, userCity = 'Tunis') {
           return `• ${name}: ${irr.volume} L le ${date} (ETc: ${irr.etc} mm/j, Mode: ${irr.mode}, Kc: ${irr.kc})`;
         }).join('\n');
 
-    // ── Besoins ETc ───────────────────────────────────────────────────────────
     const irrigationNeeds = cultures.length > 0 && weather?.et0
       ? cultures.map(c => {
           if (!c.kcActuel || !weather.et0) return null;
@@ -234,21 +225,16 @@ async function buildUserContext(userId, userCity = 'Tunis') {
         }).filter(Boolean).join('\n')
       : 'Calcul ETc non disponible (météo manquante).';
 
-    // ── Prochaines irrigations ────────────────────────────────────────────────
     const nextIrrigLines = cultures.length === 0
       ? 'Aucune culture enregistrée.'
       : cultures.map(c => {
           const cid  = c._id.toString();
           const last = lastIrrigByCulture[cid];
-
           if (!last) return `• ${c.nom} (${c.variete}): aucune irrigation enregistrée`;
-
-          // Priorité 1 : prochaineDate stockée
           if (last.prochaineDate) {
             return `• ${c.nom} (${c.variete}): prochaine irrigation le ${formatDate(last.prochaineDate)} [${joursLabel(last.prochaineDate)}]` +
                    (last.frequenceJours ? ` — fréquence: ${last.frequenceJours} jours` : '');
           }
-          // Priorité 2 : calcul via frequenceJours
           if (last.frequenceJours > 0) {
             const next = new Date(new Date(last.date).getTime() + last.frequenceJours * 86400000);
             return `• ${c.nom} (${c.variete}): prochaine irrigation estimée le ${formatDate(next)} [${joursLabel(next)}]` +
@@ -257,27 +243,22 @@ async function buildUserContext(userId, userCity = 'Tunis') {
           return `• ${c.nom} (${c.variete}): dernière irrigation le ${formatDate(last.date)} — fréquence non définie`;
         }).join('\n');
 
-    // ── Prochaines fertilisations ─────────────────────────────────────────────
     const nextFertLines = cultures.length === 0
       ? 'Aucune culture enregistrée.'
       : cultures.map(c => {
           const cid  = c._id.toString();
           const last = lastFertByCulture[cid];
-
-          // Priorité 1 : prochaineDate stockée en DB
           if (last?.prochaineDate) {
             return `• ${c.nom} (${c.variete}): prochaine fertilisation le ${formatDate(last.prochaineDate)} [${joursLabel(last.prochaineDate)}]` +
                    ` — produit: ${last.produit} (${last.typeProduit})` +
                    (last.frequenceJours ? ` — fréquence: ${last.frequenceJours} jours` : '');
           }
-          // Priorité 2 : calcul via frequenceJours en DB
           if (last?.frequenceJours > 0) {
             const next = new Date(new Date(last.date).getTime() + last.frequenceJours * 86400000);
             return `• ${c.nom} (${c.variete}): prochaine fertilisation estimée le ${formatDate(next)} [${joursLabel(next)}]` +
                    ` — produit: ${last.produit} (${last.typeProduit})` +
                    ` — fréquence: ${last.frequenceJours} jours`;
           }
-          // Priorité 3 : calendrier FAO-56 statique (fallback quand rien en DB)
           const fao = getNextFAOFertDate(c.nom);
           if (fao) {
             const label = last
@@ -288,7 +269,6 @@ async function buildUserContext(userId, userCity = 'Tunis') {
           return `• ${c.nom} (${c.variete}): aucune donnée de fertilisation disponible`;
         }).join('\n');
 
-    // ── Météo ─────────────────────────────────────────────────────────────────
     const weatherSummary = weather
       ? [
           `Ville: ${weather.location?.city || userCity}`,
@@ -313,7 +293,7 @@ async function buildUserContext(userId, userCity = 'Tunis') {
     };
 
   } catch (error) {
-    console.error('❌ Error building user context:', error.message);
+    console.error('❌ [AI] buildUserContext error:', error.message);
     return {
       cropCount:         0,
       cropsSummary:      'Impossible de charger les cultures.',
@@ -332,10 +312,15 @@ router.post('/chat', requireUser, async (req, res) => {
   try {
     const { message, conversation_id, city } = req.body;
 
+    // ── Logs de debug (à retirer en production) ───────────────────────────────
+    console.log('📥 [AI] body reçu:', { message: message?.slice(0, 80), conversation_id, city });
+    console.log('👤 [AI] userId:', req.userId);
+
     if (!message?.trim()) {
       return res.status(400).json({ success: false, error: 'Message requis.' });
     }
     if (!DIFY_API_KEY) {
+      console.error('❌ [AI] DIFY_API_KEY manquante dans .env');
       return res.status(500).json({
         success: false,
         error:   'DIFY_API_KEY non configuré. Ajoutez-le dans votre .env',
@@ -371,23 +356,30 @@ ${langHint}
 [MESSAGE UTILISATEUR]
 ${message.trim()}`;
 
+    // ── Payload Dify — conversation_id omis si vide ───────────────────────────
+    const difyPayload = {
+      inputs:        {},
+      query:         enrichedMessage,
+      response_mode: 'blocking',
+      user:          req.userId.toString(),
+    };
+    if (conversation_id) difyPayload.conversation_id = conversation_id;
+
+    console.log('🚀 [AI] Appel Dify — conversation_id:', conversation_id || '(nouveau)');
+
     const difyResponse = await axios.post(
       `${DIFY_BASE_URL}/chat-messages`,
-      {
-        inputs:          {},
-        query:           enrichedMessage,
-        response_mode:   'blocking',
-        conversation_id: conversation_id || '',
-        user:            req.userId.toString(),
-      },
+      difyPayload,
       {
         headers: {
           Authorization:  `Bearer ${DIFY_API_KEY}`,
           'Content-Type': 'application/json',
         },
-        timeout: 30000,
+        timeout: 60000, // 60s — contexte enrichi peut être long
       }
     );
+
+    console.log('✅ [AI] Réponse Dify reçue — conversation_id:', difyResponse.data.conversation_id);
 
     return res.json({
       success:         true,
@@ -400,18 +392,37 @@ ${message.trim()}`;
     });
 
   } catch (error) {
-    console.error('❌ AI Chat error:', error.response?.data || error.message);
+    // ── Logs détaillés pour debug ──────────────────────────────────────────────
+    const difyStatus = error.response?.status;
+    const difyData   = error.response?.data;
+    console.error('❌ [AI] Dify status :', difyStatus);
+    console.error('❌ [AI] Dify data   :', JSON.stringify(difyData));
+    console.error('❌ [AI] Error msg   :', error.message);
+    console.error('❌ [AI] Error code  :', error.code);
 
-    if (error.response?.status === 401) {
-      return res.status(500).json({ success: false, error: 'Clé API Dify invalide.' });
+    // ── Réponses spécifiques ───────────────────────────────────────────────────
+    if (error.code === 'ECONNABORTED') {
+      return res.status(500).json({ success: false, error: 'Timeout — Dify a mis trop de temps à répondre.' });
     }
-    if (error.response?.status === 404) {
+    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      return res.status(500).json({ success: false, error: 'Impossible de joindre Dify. Vérifiez DIFY_BASE_URL.' });
+    }
+    if (difyStatus === 401) {
+      return res.status(500).json({ success: false, error: 'Clé API Dify invalide ou expirée.' });
+    }
+    if (difyStatus === 404) {
       return res.status(500).json({ success: false, error: 'App Dify introuvable. Vérifiez votre clé API.' });
+    }
+    if (difyStatus === 400) {
+      return res.status(500).json({
+        success: false,
+        error:   `Requête Dify invalide: ${difyData?.message || 'paramètre incorrect'}`,
+      });
     }
 
     return res.status(500).json({
       success: false,
-      error:   'Service IA temporairement indisponible. Réessayez.',
+      error:   `Service IA indisponible (${difyStatus || error.code || 'réseau'}): ${difyData?.message || error.message}`,
     });
   }
 });

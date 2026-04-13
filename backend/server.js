@@ -10,10 +10,9 @@ function loadEnvFile(filePath) {
   } catch {}
 }
 
-// Load env from repo root first (recommended), then backend/.env as fallback.
-// Does NOT override real environment variables (e.g. Render dashboard vars).
 loadEnvFile(path.resolve(__dirname, "..", ".env"));
 loadEnvFile(path.resolve(__dirname, ".env"));
+
 const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
@@ -24,7 +23,7 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const nodemailer = require("nodemailer");
 const { Resend } = require("resend");
-const { OAuth2Client } = require("google-auth-library"); // ✅ NOUVEAU
+const { OAuth2Client } = require("google-auth-library");
 
 const weatherRoutes    = require("./src/routes/weatherRoutes");
 const kcRoutes         = require("./src/routes/kcRoutes");
@@ -35,7 +34,6 @@ const userRoutes       = require("./src/routes/userRoutes");
 const messageRoutes    = require("./src/routes/messageRoutes");
 const Irrigation       = require("./src/models/Irrigation");
 const { connectAllMongo } = require("./config/mongodbConnections");
-
 const aiRoutes = require('./src/routes/aiRoutes');
 
 const app = express();
@@ -48,6 +46,7 @@ app.use(cors({
 app.use(express.json());
 app.use(morgan("dev"));
 app.use('/api/ai', aiRoutes);
+
 const PORT           = Number.parseInt(process.env.PORT, 10) || 5000;
 const JWT_SECRET     = process.env.JWT_SECRET  || "default-secret-change-in-production";
 const APP_URL        = process.env.APP_URL      || "http://localhost:3000";
@@ -55,13 +54,11 @@ const ADMIN_EMAIL    = String(process.env.ADMIN_EMAIL    || "").trim().toLowerCa
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "").trim();
 const ADMIN_NAME     = String(process.env.ADMIN_NAME     || "Administrateur").trim();
 
-// ✅ Google OAuth Client IDs (Web + Android)
 const GOOGLE_CLIENT_IDS = [
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_ANDROID_CLIENT_ID,
 ].filter(Boolean);
 
-// ✅ Resend — HTTP, fonctionne parfaitement sur Render
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
@@ -80,14 +77,10 @@ function hasGmailConfig() {
 function createGmailTransport() {
   return nodemailer.createTransport({
     service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
+    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
   });
 }
 
-// ─── EMAIL ────────────────────────────────────────────────────────────────────
 async function sendResetCodeEmail(email, resetCode, userName) {
   const allowLogCode = shouldLogResetCodes();
   const provider = String(process.env.EMAIL_PROVIDER || "auto").trim().toLowerCase();
@@ -109,7 +102,6 @@ async function sendResetCodeEmail(email, resetCode, userName) {
         console.log(`Email sent via Gmail to: ${to || email}`);
         return true;
       }
-
       if (allowLogCode) {
         console.log(`[DEV] Reset code for ${to || email}: ${resetCode}`);
       } else {
@@ -148,7 +140,6 @@ async function sendResetCodeEmail(email, resetCode, userName) {
 
     if (error) {
       console.warn(`[Resend] Erreur envoi email: ${JSON.stringify(error)}`);
-
       if (provider !== "resend" && hasGmailConfig()) {
         try {
           const transporter = createGmailTransport();
@@ -167,10 +158,7 @@ async function sendResetCodeEmail(email, resetCode, userName) {
           console.warn(`[Email][Gmail] Failed after Resend error: ${gmailErr.message}`);
         }
       }
-
-      if (allowLogCode) {
-        console.log(`[DEV] Reset code for ${to || email}: ${resetCode}`);
-      }
+      if (allowLogCode) console.log(`[DEV] Reset code for ${to || email}: ${resetCode}`);
       return false;
     }
 
@@ -178,9 +166,7 @@ async function sendResetCodeEmail(email, resetCode, userName) {
     return true;
   } catch (error) {
     console.warn(`[Email] Échec: ${error.message}`);
-    if (allowLogCode) {
-      console.log(`[DEV] Reset code for ${to || email}: ${resetCode}`);
-    }
+    if (allowLogCode) console.log(`[DEV] Reset code for ${to || email}: ${resetCode}`);
     return false;
   }
 }
@@ -210,20 +196,13 @@ const adminSchema = new mongoose.Schema({
 
 const Admin = mongoose.models.Admin || mongoose.model("Admin", adminSchema);
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
 
 async function ensureAdminAccount() {
-  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
-    console.warn("ADMIN_EMAIL / ADMIN_PASSWORD non définis.");
-    return;
-  }
-  if (ADMIN_PASSWORD.length < 8) {
-    console.warn("ADMIN_PASSWORD doit contenir au moins 8 caractères.");
-    return;
-  }
+  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) { console.warn("ADMIN_EMAIL / ADMIN_PASSWORD non définis."); return; }
+  if (ADMIN_PASSWORD.length < 8) { console.warn("ADMIN_PASSWORD doit contenir au moins 8 caractères."); return; }
   const existingAdmin = await Admin.findOne({ email: ADMIN_EMAIL });
   if (existingAdmin) return;
   const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
@@ -240,10 +219,7 @@ async function requireAdmin(req, res, next) {
     catch { return res.status(401).json({ message: "Token invalide." }); }
     if (!decoded || decoded.role !== "admin") return res.status(403).json({ message: "Accès admin requis." });
     let admin = await Admin.findById(decoded.id).catch(() => null);
-    if (!admin) {
-      req.admin = { _id: decoded.id, email: "admin@smartirrig.com" };
-      return next();
-    }
+    if (!admin) { req.admin = { _id: decoded.id, email: "admin@smartirrig.com" }; return next(); }
     req.admin = admin;
     return next();
   } catch (error) {
@@ -251,19 +227,12 @@ async function requireAdmin(req, res, next) {
   }
 }
 
-// ✅ NOUVEAU : Vérifier un idToken Google (mobile Android/iOS)
 async function verifyGoogleIdToken(idToken) {
   for (const clientId of GOOGLE_CLIENT_IDS) {
     try {
       const client = new OAuth2Client(clientId);
-      const ticket = await client.verifyIdToken({
-        idToken,
-        audience: GOOGLE_CLIENT_IDS, // accepte tous les client IDs
-      });
-      if (ticket) {
-        console.log(`✅ idToken vérifié avec clientId: ${clientId}`);
-        return ticket.getPayload();
-      }
+      const ticket = await client.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_IDS });
+      if (ticket) { console.log(`✅ idToken vérifié avec clientId: ${clientId}`); return ticket.getPayload(); }
     } catch (err) {
       console.warn(`[Google] Échec vérification avec clientId ${clientId}: ${err.message}`);
     }
@@ -277,23 +246,20 @@ app.get("/api/health", (req, res) => {
 });
 
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
-app.use("/api/weather",    weatherRoutes);
-app.use("/api/kc",         kcRoutes);
-app.use("/api/cultures",   cultureRoutes);
-app.use("/api/irrigations",irrigationRoutes);
-app.use("/api/admin",      adminRoutes);
-app.use("/api/users",      userRoutes);
-app.use("/api/messages",   messageRoutes);
+app.use("/api/weather",     weatherRoutes);
+app.use("/api/kc",          kcRoutes);
+app.use("/api/cultures",    cultureRoutes);
+app.use("/api/irrigations", irrigationRoutes);
+app.use("/api/admin",       adminRoutes);
+app.use("/api/users",       userRoutes);
+app.use("/api/messages",    messageRoutes);
 
 // ─── AUTH ROUTES ──────────────────────────────────────────────────────────────
-
-// POST /api/auth/register
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { firstName, lastName, address, email, password } = req.body;
-    if (!firstName || !lastName || !address || !email || !password) {
+    if (!firstName || !lastName || !address || !email || !password)
       return res.status(400).json({ message: "Tous les champs sont requis." });
-    }
     if (password.length < 8) return res.status(400).json({ message: "Mot de passe min 8 caractères." });
     const existing = await User.findOne({ email: normalizeEmail(email) });
     if (existing) return res.status(409).json({ message: "Cet email est déjà utilisé." });
@@ -313,7 +279,6 @@ app.post("/api/auth/register", async (req, res) => {
   }
 });
 
-// POST /api/auth/login
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -333,7 +298,6 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// POST /api/admin/login
 app.post("/api/admin/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -354,7 +318,6 @@ app.post("/api/admin/login", async (req, res) => {
   }
 });
 
-// GET /api/auth/profile
 app.get("/api/auth/profile", async (req, res) => {
   try {
     const token = req.headers.authorization?.split(" ")[1];
@@ -368,15 +331,12 @@ app.get("/api/auth/profile", async (req, res) => {
   }
 });
 
-// POST /api/auth/forgot-password
 app.post("/api/auth/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: "L'email est requis." });
     const user = await User.findOne({ email: normalizeEmail(email) });
-    if (!user) {
-      return res.json({ message: "Si cet email est associé à un compte, vous recevrez un code." });
-    }
+    if (!user) return res.json({ message: "Si cet email est associé à un compte, vous recevrez un code." });
     const resetCode = crypto.randomBytes(3).toString("hex").toUpperCase();
     const resetCodeExpiry = new Date(Date.now() + 15 * 60 * 1000);
     user.resetCode = resetCode;
@@ -391,7 +351,6 @@ app.post("/api/auth/forgot-password", async (req, res) => {
   }
 });
 
-// POST /api/auth/verify-code
 app.post("/api/auth/verify-code", async (req, res) => {
   try {
     const { email, code } = req.body;
@@ -407,7 +366,6 @@ app.post("/api/auth/verify-code", async (req, res) => {
   }
 });
 
-// POST /api/auth/reset-password
 app.post("/api/auth/reset-password", async (req, res) => {
   try {
     const { email, code, newPassword } = req.body;
@@ -429,42 +387,24 @@ app.post("/api/auth/reset-password", async (req, res) => {
   }
 });
 
-// ✅ POST /api/auth/google — CORRIGÉ pour Web ET Mobile (Android/iOS)
 app.post("/api/auth/google", async (req, res) => {
   try {
     const { accessToken, idToken } = req.body;
-
-    if (!accessToken && !idToken) {
-      return res.status(400).json({ message: "accessToken ou idToken requis." });
-    }
+    if (!accessToken && !idToken) return res.status(400).json({ message: "accessToken ou idToken requis." });
 
     let profile;
-
-    // ── Cas 1 : idToken → Mobile Android / iOS ──────────────────────────────
     if (idToken) {
       console.log("[Google] Tentative avec idToken (mobile)...");
-
-      if (GOOGLE_CLIENT_IDS.length === 0) {
-        return res.status(500).json({ message: "GOOGLE_CLIENT_ID non configuré sur le serveur." });
-      }
-
+      if (GOOGLE_CLIENT_IDS.length === 0) return res.status(500).json({ message: "GOOGLE_CLIENT_ID non configuré sur le serveur." });
       profile = await verifyGoogleIdToken(idToken);
-
-      if (!profile) {
-        return res.status(401).json({ message: "idToken Google invalide ou expiré." });
-      }
-
+      if (!profile) return res.status(401).json({ message: "idToken Google invalide ou expiré." });
       console.log(`[Google] Profil mobile récupéré: ${profile.email}`);
-    }
-
-    // ── Cas 2 : accessToken → Web ────────────────────────────────────────────
-    else if (accessToken) {
+    } else if (accessToken) {
       console.log("[Google] Tentative avec accessToken (web)...");
       try {
         const axios = require("axios");
         const r = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          timeout: 8000,
+          headers: { Authorization: `Bearer ${accessToken}` }, timeout: 8000,
         });
         profile = r.data;
         console.log(`[Google] Profil web récupéré: ${profile.email}`);
@@ -474,45 +414,27 @@ app.post("/api/auth/google", async (req, res) => {
       }
     }
 
-    // ── Créer ou récupérer l'utilisateur ─────────────────────────────────────
     const { email, given_name, family_name, name } = profile;
     if (!email) return res.status(400).json({ message: "Email Google non disponible." });
-
     const normalizedEmail = normalizeEmail(email);
     let user = await User.findOne({ email: normalizedEmail });
-
     if (!user) {
-      // Décompose le nom complet si given_name/family_name absents (cas idToken)
       let firstName = given_name || (name ? name.split(" ")[0] : "Google");
       let lastName  = family_name || (name ? name.split(" ").slice(1).join(" ") : "User") || "User";
-
-      const hashed = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 12);
+      const hashed  = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 12);
       user = await User.create({
-        firstName,
-        lastName,
-        address:  "Non renseigné",
-        email:    normalizedEmail,
-        password: hashed,
-        isActive: true,
+        firstName, lastName, address: "Non renseigné",
+        email: normalizedEmail, password: hashed, isActive: true,
       });
       console.log(`[Google] Nouvel utilisateur créé: ${normalizedEmail}`);
     } else {
       console.log(`[Google] Utilisateur existant connecté: ${normalizedEmail}`);
     }
-
     const token = jwt.sign({ id: user._id, role: "user" }, JWT_SECRET, { expiresIn: "7d" });
     return res.json({
-      message: "Connexion Google réussie.",
-      token,
-      role: "user",
-      user: {
-        id:        user._id,
-        firstName: user.firstName,
-        lastName:  user.lastName,
-        email:     user.email,
-      },
+      message: "Connexion Google réussie.", token, role: "user",
+      user: { id: user._id, firstName: user.firstName, lastName: user.lastName, email: user.email },
     });
-
   } catch (e) {
     console.error("Google auth error:", e.message);
     res.status(500).json({ message: "Erreur connexion Google." });
@@ -537,6 +459,30 @@ async function startServer() {
         console.warn("⚠️  GOOGLE_CLIENT_ID non configuré — Google Auth désactivé");
       } else {
         console.log(`✅ Google Auth configuré (${GOOGLE_CLIENT_IDS.length} client ID(s))`);
+      }
+
+      // ✅ KEEP-ALIVE : ping automatique toutes les 14 minutes
+      // Empêche Render (plan gratuit) de mettre le serveur en veille après 15min
+      const RENDER_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+      const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+
+      if (isProduction) {
+        const http = require('http');
+        const https = require('https');
+
+        setInterval(() => {
+          const url = RENDER_URL.startsWith('https') ? RENDER_URL : `https://smartirrigation-2.onrender.com`;
+          const client = url.startsWith('https') ? https : http;
+
+          client.get(`${url}/api/health`, (res) => {
+            console.log(`✅ [KeepAlive] Ping serveur OK — status: ${res.statusCode}`);
+          }).on('error', (err) => {
+            console.warn(`⚠️ [KeepAlive] Ping échoué: ${err.message}`);
+          });
+
+        }, 14 * 60 * 1000); // toutes les 14 minutes
+
+        console.log('✅ Keep-alive activé (ping toutes les 14min)');
       }
     });
   } catch (error) {
